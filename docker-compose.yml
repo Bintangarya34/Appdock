@@ -1,0 +1,104 @@
+version: '3.8'
+
+services:
+  # Traefik Reverse Proxy & Load Balancer
+  traefik:
+    image: traefik:v3.0
+    container_name: traefik
+    command:
+      # Enable Docker provider
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      
+      # Configure entrypoints
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      
+      # Enable API and Dashboard
+      - --api.insecure=true
+      - --api.dashboard=true
+      
+      # Configure logging
+      - --log.level=DEBUG
+      - --accesslog=true
+      
+      # Configure load balancer
+      - --serverstransport.insecureskipverify=true
+    ports:
+      - "80:80"      # HTTP
+      - "443:443"    # HTTPS
+      - "8080:8080"  # Traefik Dashboard
+    volumes:
+      - //var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+
+  # Aplikasi Web Instance 1
+  web-app-1:
+    build: ./web-app
+    container_name: web-app-1
+    environment:
+      - NODE_ENV=production
+      - INSTANCE_ID=1
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - traefik-network
+      - app-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webapp.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.webapp.entrypoints=web"
+      - "traefik.http.services.webapp.loadbalancer.server.port=3000"
+    depends_on:
+      - redis
+
+  # Aplikasi Web Instance 2
+  web-app-2:
+    build: ./web-app
+    container_name: web-app-2
+    environment:
+      - NODE_ENV=production
+      - INSTANCE_ID=2
+      - REDIS_URL=redis://redis:6379
+    networks:
+      - traefik-network
+      - app-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webapp.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.webapp.entrypoints=web"
+      - "traefik.http.services.webapp.loadbalancer.server.port=3000"
+    depends_on:
+      - redis
+
+  # Redis Database
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+
+# Networks
+networks:
+  traefik-network:
+    driver: bridge
+  app-network:
+    driver: bridge
+
+# Volumes
+volumes:
+  redis-data:
+    driver: local
